@@ -1,0 +1,7 @@
+[package]
+name = "jira-issues"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+polars = { version = "0.40.0", features = ["concat_str", "lazy", "strings"] }
