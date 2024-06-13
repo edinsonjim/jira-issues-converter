@@ -1,6 +1,8 @@
-use std::{fs::File, sync::Arc};
+use std::fs::File;
 
+use env_logger::Env;
 use polars::{
+    frame::DataFrame,
     io::{SerReader, SerWriter},
     lazy::dsl::{col, concat_str, GetOutput},
     prelude::{CsvReadOptions, CsvWriter, IntoLazy},
@@ -40,50 +42,54 @@ fn decode_row_with(row_val: &str, decoders: &Vec<Decoder>) -> String {
         .unwrap_or_else(|| "Not Decoded".to_owned())
 }
 
-fn main() {
-    let decoder_file = File::open("./decoder.yml").expect("failed to open decoder.yml");
-    let decoder_settings: DecoderConfig =
-        serde_yaml::from_reader(decoder_file).expect("failed to read decoder");
-    let conf = Arc::new(decoder_settings);
+fn read_decoder_config(path: &str) -> DecoderConfig {
+    let file = File::open(path).expect("failed to open decoder.yml");
+    serde_yaml::from_reader(file).expect("failed to read decoder")
+}
 
-    let df = CsvReadOptions::default()
-        .try_into_reader_with_file_path(Some("./data/Jira 2024-06-12T11_32_40+0200.csv".into()))
-        .unwrap()
+fn write_csv_file(path: &str, df: &mut DataFrame) {
+    let mut file = File::create(path).expect("could not create output file");
+    CsvWriter::new(&mut file)
+        .include_header(true)
+        .with_separator(b',')
+        .finish(df)
+        .expect("could not write transformed file");
+}
+
+fn read_csv_file(path: &str) -> DataFrame {
+    CsvReadOptions::default()
+        .try_into_reader_with_file_path(Some(path.into()))
+        .expect("failed to read CSV file")
         .finish()
-        .unwrap();
+        .expect("failed to parse CSV file")
+}
 
-    let mut transformed = df
+fn main() {
+    env_logger::Builder::from_env(Env::default().default_filter_or("info")).init();
+
+    log::info!("loading decoder config");
+    let decoder_conf = read_decoder_config("./decoder.yml");
+
+    log::info!("reading csv file");
+    let df = read_csv_file("./input.csv");
+
+    log::info!("decoding csv file");
+    let mut df_decoded = df
         .clone()
         .lazy()
         .with_columns([
-            // some sample
             (col("Sprint").map(
-                {
-                    let conf = Arc::clone(&conf);
-                    move |series: Series| {
-                        let decoder_config = &conf.sprints;
-                        let new_series = map_col_series(&series, decoder_config);
-                        Ok(new_series)
-                    }
-                },
+                move |series: Series| Ok(map_col_series(&series, &decoder_conf.epics)),
                 GetOutput::same_type(),
             ))
             .alias("Sprint Output"),
             (col("Custom field (Epic Link)")
                 .map(
-                    {
-                        let conf = Arc::clone(&conf);
-                        move |series| {
-                            let decoder_config = &conf.epics;
-                            let new_series = map_col_series(&series, decoder_config);
-                            Ok(new_series)
-                        }
-                    },
+                    move |series| Ok(map_col_series(&series, &decoder_conf.sprints)),
                     GetOutput::same_type(),
                 )
                 .alias("Epic Link Output")),
-            // concat issue key with summary
-            concat_str([col("Issue key"), col("Summary")], " | ", true).alias("Summary Output"),
+            concat_str([col("Issue key"), col("Summary")], " - ", true).alias("Summary Output"),
         ])
         .select([
             col("Summary"),
@@ -100,14 +106,8 @@ fn main() {
             col("Epic Link Output"),
         ])
         .collect()
-        .expect("failed to collect by issue key");
+        .expect("failed to collect data frame");
 
-    println!("{}", transformed);
-
-    let mut file = File::create("./dist/output.csv").expect("could not create output file");
-    CsvWriter::new(&mut file)
-        .include_header(true)
-        .with_separator(b',')
-        .finish(&mut transformed)
-        .expect("could not write transformed file");
+    log::info!("writing output file");
+    write_csv_file("./output.csv", &mut df_decoded);
 }
