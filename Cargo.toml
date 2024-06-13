@@ -5,3 +5,5 @@ edition = "2021"
 
 [dependencies]
 polars = { version = "0.40.0", features = ["concat_str", "lazy", "strings"] }
+serde = { version = "1.0.203", features = ["derive"] }
+serde_yaml = "0.9.34"
