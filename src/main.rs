@@ -79,13 +79,13 @@ fn main() {
         .lazy()
         .with_columns([
             (col("Sprint").map(
-                move |series: Series| Ok(map_col_series(&series, &decoder_conf.epics)),
+                move |series: Series| Ok(map_col_series(&series, &decoder_conf.sprints)),
                 GetOutput::same_type(),
             ))
             .alias("Sprint Output"),
             (col("Custom field (Epic Link)")
                 .map(
-                    move |series| Ok(map_col_series(&series, &decoder_conf.sprints)),
+                    move |series| Ok(map_col_series(&series, &decoder_conf.epics)),
                     GetOutput::same_type(),
                 )
                 .alias("Epic Link Output")),
